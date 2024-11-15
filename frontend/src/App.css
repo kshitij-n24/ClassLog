@@ -1,0 +1,93 @@
+/* General Styles */
+body {
+  margin: 0;
+  font-family: "Arial", sans-serif;
+  background-color: #f9f8fc;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.container {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 8px;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  width: 400px;
+}
+
+.title {
+  font-size: 24px;
+  color: #6a4bc3;
+  margin: 0;
+  font-weight: bold;
+}
+
+.subtitle {
+  font-size: 22px;
+  font-weight: bold;
+  color: #000;
+  margin: 15px 0 5px;
+}
+
+.lecture {
+  font-size: 18px;
+  font-weight: bold;
+  margin: 5px 0;
+  color: #333;
+}
+
+.grade {
+  font-size: 14px;
+  color: #777;
+  margin-bottom: 20px;
+}
+
+/* File Upload Styles */
+.upload-box {
+  border: 2px dashed #d3d2df;
+  background-color: #f8f7fd;
+  border-radius: 10px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-label {
+  font-size: 16px;
+  color: #6a4bc3;
+  cursor: pointer;
+  display: inline-block;
+  font-weight: bold;
+  text-align: center;
+}
+
+.file-label i {
+  margin-right: 5px;
+}
+
+/* Process Button */
+.process-button {
+  background-color: #6a4bc3;
+  color: white;
+  font-size: 16px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.process-button:disabled {
+  background-color: #9c89d1;
+  cursor: not-allowed;
+}
+
+.output {
+  margin-top: 20px;
+}
