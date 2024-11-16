@@ -2,18 +2,22 @@ import os
 import torch
 import whisper
 import multiprocessing
-from flask import request
+from flask import Flask, request, jsonify, send_file, Response
+from flask_cors import CORS  # Import flask-cors
 from pydub import AudioSegment
 from pydub.utils import make_chunks
 from moviepy.editor import VideoFileClip
 from concurrent.futures import ProcessPoolExecutor
-from flask import Flask, jsonify, send_file, Response
 
+# Ensure multiprocessing compatibility
 if multiprocessing.get_start_method(allow_none=True) != 'spawn':
-        multiprocessing.set_start_method('spawn')
+    multiprocessing.set_start_method('spawn')
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Enable CORS for all routes
+CORS(app)
 
 def extract_audio(video_path, audio_path="output_audio.mp3"):
     """
@@ -57,7 +61,6 @@ def transcribe_chunk(chunk_path, model_name="base"):
     result = model.transcribe(chunk_path)
     print(f"Completed transcription for {chunk_path}")
     return result['text']
-
 
 
 def transcribe_audio_chunks(chunk_paths, model, use_gpu=True):
@@ -106,8 +109,11 @@ def upload_lctrec():
     Endpoint to handle video uploads and process transcripts.
     """
     try:
+        print("Received a POST request to /upload")  # Log message when a POST request is received
+
         video = request.files.get('file')
         if not video:
+            print("No video file uploaded")  # Log error if no video file is provided
             return jsonify({"error": "No video file uploaded"}), 400
 
         video_path = "temp_video.mp4"
@@ -115,6 +121,7 @@ def upload_lctrec():
 
         # Save the uploaded video
         video.save(video_path)
+        print(f"Video saved to {video_path}")
 
         # Step 1: Extract audio
         audio_path = extract_audio(video_path)
@@ -134,9 +141,11 @@ def upload_lctrec():
         for chunk in chunk_paths:
             os.remove(chunk)
 
+        print("Transcription process completed successfully")  # Log success message
         return jsonify({"message": "Transcription completed", "transcript_file": transcript_file}), 200
 
     except Exception as e:
+        print(f"Error processing request: {str(e)}")  # Log error message
         return jsonify({"error": str(e)}), 500
 
 

@@ -1,10 +1,9 @@
 import React, { useState } from "react";
-import { FFmpeg } from "@ffmpeg/ffmpeg";
 import "./App.css";
 
 const App = () => {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [audioUrl, setAudioUrl] = useState(null);
+  const [responseMessage, setResponseMessage] = useState(null);
 
   const handleFileChange = async (event) => {
     const videoFile = event.target.files[0];
@@ -13,29 +12,50 @@ const App = () => {
     setIsProcessing(true);
 
     try {
-      const ffmpeg = new FFmpeg();
-      await ffmpeg.load();
+      const formData = new FormData();
+      formData.append("file", videoFile);
 
-      const videoData = await videoFile.arrayBuffer();
+      // Send POST request to backend
+      const response = await fetch("http://127.0.0.1:5000/upload", {
+        method: "POST",
+        body: formData,
+      });
 
-      ffmpeg.FS("writeFile", "input.mp4", new Uint8Array(videoData));
-      await ffmpeg.run(
-        "-i",
-        "input.mp4",
-        "-q:a",
-        "0",
-        "-map",
-        "a",
-        "output.mp3"
-      );
+      if (!response.ok) {
+        throw new Error(`Error: ${response.statusText}`);
+      }
 
-      const audioData = ffmpeg.FS("readFile", "output.mp3");
-      const audioBlob = new Blob([audioData.buffer], { type: "audio/mpeg" });
-      const audioUrl = URL.createObjectURL(audioBlob);
+      const data = await response.json();
+      setResponseMessage(data.message || "File uploaded successfully!");
 
-      setAudioUrl(audioUrl);
+      // If the transcript file is available, fetch and save it
+      if (data.transcript_file) {
+        const transcriptResponse = await fetch(
+          "http://127.0.0.1:5000/download_transcript"
+        );
+
+        if (!transcriptResponse.ok) {
+          throw new Error("Failed to fetch the transcript file.");
+        }
+
+        const transcriptText = await transcriptResponse.text();
+
+        // Save the transcript as a text file
+        const blob = new Blob([transcriptText], { type: "text/plain" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "transcript.txt";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        setResponseMessage(
+          `Transcription completed. Transcript saved as "transcript.txt".`
+        );
+      }
     } catch (error) {
-      console.error("Error processing video:", error);
+      console.error("Error uploading video:", error);
+      setResponseMessage("Failed to upload video. Please try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -66,17 +86,12 @@ const App = () => {
         disabled={isProcessing}
         onClick={() => document.getElementById("fileInput").click()}
       >
-        {isProcessing ? "Processing..." : "Generate Analysis"}
+        {isProcessing ? "Processing..." : "Upload Video"}
       </button>
 
-      {audioUrl && (
-        <div className="output">
-          <audio controls>
-            <source src={audioUrl} type="audio/mpeg" />
-          </audio>
-          <a href={audioUrl} download="output.mp3">
-            Download Audio
-          </a>
+      {responseMessage && (
+        <div className="response-message">
+          <p>{responseMessage}</p>
         </div>
       )}
     </div>
