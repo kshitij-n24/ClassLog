@@ -286,6 +286,8 @@ def process_video(video_path, lecture_id):
 
     topics_completed = ast.literal_eval(topics_completed.strip())
     topics_for_revision = ast.literal_eval(topics_for_revision.strip())
+
+    topics_completed
     # Save processing results in MongoDB
     results_collection.update_one(
         {"lecture_id": lecture_id},
