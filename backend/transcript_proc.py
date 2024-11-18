@@ -156,25 +156,42 @@ def transcribe_audio_chunks_with_timestamps(chunk_paths, model="base", use_gpu=T
             transcripts.extend(future.result())
     return transcripts
 
-def save_transcripts_with_timestamps(transcripts, output_file_txt="transcript.txt", output_file_json="transcript_with_timestamps.json"):
-    print(f"Saving transcripts with timestamps to {output_file_json}...")
-    with open(output_file_json, "w") as f:
-        json.dump(transcripts, f, indent=4)
+def save_transcripts_with_timestamps(transcripts, lecture_id)#, output_file_txt="transcript.txt", output_file_json="transcript_with_timestamps.json"):
+    # print(f"Saving transcripts with timestamps to {output_file_json}...")
+    # with open(output_file_json, "w") as f:
+    #     json.dump(transcripts, f, indent=4)
 
-    with open(output_file_txt, "w") as f:
-            f.write(str(transcripts) + "\n")
-    print(f"Transcripts saved to {output_file_txt} and {output_file_json}")
+    # with open(output_file_txt, "w") as f:
+    #         f.write(str(transcripts) + "\n")
+    # print(f"Transcripts saved to {output_file_txt} and {output_file_json}")
+    print(f"Saving transcripts with timestamps to DB...")
+    
+    plain_transcript = "\n".join([segment["text"] for segment in timestamp_transcript])
+
+    # Save transcripts in MongoDB
+    transcripts_collection.update_one(
+        {"lecture_id": lecture_id},
+        {"$set": {
+            "lecture_id": lecture_id,
+            "json_transcript": timestamp_transcript,
+            "plain_transcript": plain_transcript
+            }
+        },
+        upsert=True
+    )
+    print(f"Transcript saved to DB")
     return output_file_txt
 
 
-def stream_transcripts(file_path):
+def stream_transcripts(lecture_id):
     """
     Streams a large transcript file in chunks to the client.
     """
+    file_contents = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0}).get("plain_transcript")    
     def generate():
-        with open(file_path, "r") as f:
-            while chunk := f.read(1024):  # Stream 1 KB at a time
-                yield chunk
+        # with open(file_path, "r") as f:
+        while chunk := file_contents.read(1024):  # Stream 1 KB at a time
+            yield chunk
     return Response(generate(), content_type="text/plain")
 
 def process_frame(frame):
@@ -193,8 +210,9 @@ def process_frame(frame):
     return hand_raised_count
 
 
-def process_video(video_path):
+def process_video(video_path, lecture_id):
     """Processes the video to detect raised hands and analyze question responses."""
+    print('Video is being processed')
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise Exception(f"Failed to open video file: {video_path}")
@@ -209,7 +227,7 @@ def process_video(video_path):
     questions_for_revision = []
     questions_completed = []
 
-    quiz_locs = analyze_transcript()
+    quiz_locs = analyze_transcript(lecture_id)
 
     # Process each question and timestamp range
     for question_data in quiz_locs["questions"]:
@@ -247,21 +265,55 @@ def process_video(video_path):
                 questions_for_revision.append(question)
 
     cap.release()
+    
+    res_ques_complete = gemini_model.generate_content([questions_completed, """Give me the 2, 3 or 4 topics relating to each question in a list format
+            For example, 
+                ['Does supervised learning have ouput labels?', 'Is capital of Greece Aethens?']
 
-    return {
-        "questions_for_revision": questions_for_revision,
-        "questions_completed": questions_completed,
-        "detailed_results": dict(question_results)
-    }
+                Should return: ['Machine Learning', 'Artificial Intelligence', 'General Knowledge', 'Geography']
+
+            Return: List(str)
+
+        """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
+    topics_completed = res_ques_complete.text
+
+    res_ques_revision = gemini_model.generate_content([questions_for_revision, """Give me the 3 or 4 topics relating to the question in a list format
+            For example, 
+                ['Does supervised learning have ouput labels?', 'Is capital of Greece Aethens?']
+
+                Should return: ['Machine Learning', 'Artificial Intelligence', 'General Knowledge', 'Geography']
+
+                Return: List(str)
+        """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
+    topics_for_revision = res_ques_revision.text
+
+    # Save processing results in MongoDB
+    results_collection.update_one(
+        {"lecture_id": lecture_id},
+        {
+            "$set": {
+                "lecture_id": lecture_id,
+                "topics_completed": topics_completed,
+                "topics_for_revision": topics_for_revision,
+            }
+        },
+        upsert=True
+    )
+
+    print('Video is processed.')
+
+    return True
 
 
 #TODO: generalize transcript names
-def analyze_transcript():
-    with open('transcript_with_timestamps.json', 'r', encoding='utf-8') as file:
-        file_contents = file.read()
+def analyze_transcript(lecture_id):
+    # with open('transcript_with_timestamps.json', 'r', encoding='utf-8') as file:
+    #     file_contents = file.read()
+
+    file_contents = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0}).get("json_transcript")
 
     with open('temp_analyze_transcript.txt', "w") as f:
-            f.write(file_contents + "\n")
+            f.write(str(file_contents) + "\n")
 
     # for f in genai.list_files():
     #     if f.name != 'temp_analyze_transcript.txt':
@@ -285,9 +337,8 @@ def analyze_transcript():
 
         """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300))
     )
-    print(f"{result.text}")
+    # print(f"{result.text}")
     res_str = str(result.text)
-    print(type(res_str))
     res_str = res_str.split('\n',1)[1][:-4]
     res_json = json.loads(res_str)
 
@@ -306,9 +357,15 @@ def upload_lctrec():
         print("Received a POST request to /upload")  # Log message when a POST request is received
 
         video = request.files.get('file')
+        lecture_id = request.form.get('lecture_id')
         if not video:
             print("No video file uploaded")  # Log error if no video file is provided
             return jsonify({"error": "No video file uploaded"}), 400
+
+        if not lecture_id:
+            print("No lecture ID provided")  # Log error if no lecture ID is provided
+            return jsonify({"error": "No lecture ID provided"}), 400
+
 
         # video_path = "temp_video.mp4"
         # audio_path = "temp_audio.mp3"
@@ -329,12 +386,12 @@ def upload_lctrec():
         timestamp_transcript = transcribe_audio_chunks_with_timestamps(chunk_paths, model="base", use_gpu=True)
 
         # Step 4: Save transcripts
-        transcript_file = save_transcripts_with_timestamps(timestamp_transcript)
+        transcript_file = save_transcripts_with_timestamps(timestamp_transcript, lecture_id)
 
         ext = os.path.splitext(video.filename)[1].lower()
         if ext in ['.mp4', '.avi', '.mov', '.mkv']:
         # Process video
-            result = process_video(video_path)
+            process_video(video_path, lecture_id)
 
         # Cleanup temporary files
         os.remove(audio_path)
@@ -350,32 +407,34 @@ def upload_lctrec():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/download_transcript', methods=['GET'])
-def download_transcript():
+@app.route('/download_transcript/<lecture_id>', methods=['GET'])
+def download_transcript(lecture_id):
     """
     Endpoint to download the full transcript file.
     """
-    transcript_file = "transcript.txt"
+    # transcript_file = "transcript.txt"
+    file_contents = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0}).get("plain_transcript")    
     if os.path.exists(transcript_file):
-        return send_file(transcript_file, as_attachment=True)
+        return file_contents
     return jsonify({"error": "Transcript file not found"}), 404
 
 
-@app.route('/stream_transcript', methods=['GET'])
-def stream_transcript():
+@app.route('/stream_transcript/<lecture_id>', methods=['GET'])
+def stream_transcript(lecture_id):
     """
     Endpoint to stream the transcript file in chunks.
     """
-    transcript_file = "transcript.txt"
-    if os.path.exists(transcript_file):
-        return stream_transcripts(transcript_file)
+    # transcript_file = "transcript.txt"
+    # if os.path.exists(transcript_file):
+    if lecture_id != "":
+        return stream_transcripts(lecture_id)
     return jsonify({"error": "Transcript file not found"}), 404
 
 @app.route('/download_transcript_with_timestamps', methods=['GET'])
 def download_transcript_with_timestamps():
-    transcript_file = "transcript_with_timestamps.json"
-    if os.path.exists(transcript_file):
-        return send_file(transcript_file, as_attachment=True)
+    file_contents = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0}).get("json_transcript")    
+    if file_contents != None:
+        return send_file(file_contents, as_attachment=True)
     return jsonify({"error": "Transcript file not found"}), 404
 
 if __name__ == "__main__":
