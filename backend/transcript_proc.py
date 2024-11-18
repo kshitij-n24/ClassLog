@@ -126,21 +126,30 @@ def transcribe_audio_chunks_with_timestamps(chunk_paths, model="base", use_gpu=T
 def save_transcripts_with_timestamps(transcripts, lecture_id):
     print(f"Saving transcripts with timestamps to DB...")
     
-    plain_transcript = "\n".join([segment["text"] for segment in timestamp_transcript])
+    plain_transcript = "\n".join([segment["text"] for segment in transcripts])
+
+    json_transcript = [
+        {
+            "text": segment["text"],
+            "start": segment["start"],
+            "end": segment["end"]
+        }
+        for segment in transcripts
+    ]
 
     # Save transcripts in MongoDB
     transcripts_collection.update_one(
         {"lecture_id": lecture_id},
         {"$set": {
             "lecture_id": lecture_id,
-            "json_transcript": timestamp_transcript,
+            "json_transcript": json_transcript,
             "plain_transcript": plain_transcript
             }
         },
         upsert=True
     )
     print(f"Transcript saved to DB")
-    return output_file_txt
+    return plain_transcript
 
 
 def stream_transcripts(lecture_id):
@@ -225,7 +234,7 @@ def process_video(video_path, lecture_id):
             correct_ans = str(correct_ans_res.text)
 
             # Categorize question
-            if correct_ans.lower() == "yes"
+            if correct_ans.lower() == "yes":
                 if yes_count / total_students >= 0.7:  # Example threshold for completion
                     questions_completed.append(question)
                 else:
@@ -357,6 +366,7 @@ def upload_lctrec():
         # transcripts = transcribe_audio_chunks(chunk_paths, model="base", use_gpu=True)
         timestamp_transcript = transcribe_audio_chunks_with_timestamps(chunk_paths, model="base", use_gpu=True)
 
+        print(timestamp_transcript)
         # Step 4: Save transcripts
         transcript_file = save_transcripts_with_timestamps(timestamp_transcript, lecture_id)
 
@@ -384,7 +394,6 @@ def download_transcript(lecture_id):
     """
     Endpoint to download the full transcript file.
     """
-    # transcript_file = "transcript.txt"
     file_contents = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0}).get("plain_transcript")    
     if os.path.exists(transcript_file):
         return file_contents
@@ -396,8 +405,6 @@ def stream_transcript(lecture_id):
     """
     Endpoint to stream the transcript file in chunks.
     """
-    # transcript_file = "transcript.txt"
-    # if os.path.exists(transcript_file):
     if lecture_id != "":
         return stream_transcripts(lecture_id)
     return jsonify({"error": "Transcript file not found"}), 404
