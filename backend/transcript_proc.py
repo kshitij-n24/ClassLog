@@ -230,7 +230,7 @@ def process_video(video_path, lecture_id):
                 "not_answered": not_answered
             }
 
-            correct_ans_res = gemini_model.generate_content([question, "Give me 1 word answer whether the correct answer to this question is either yes or no. Do not return anything else, just that single word."], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
+            correct_ans_res = gemini_model.generate_content([str(question), "Give me 1 word answer whether the correct answer to this question is either yes or no. Do not return anything else, just that single word."], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
             correct_ans = str(correct_ans_res.text)
 
             # Categorize question
@@ -247,7 +247,7 @@ def process_video(video_path, lecture_id):
 
     cap.release()
     
-    res_ques_complete = gemini_model.generate_content([questions_completed, """Give me the 2, 3 or 4 topics relating to each question in a list format
+    res_ques_complete = gemini_model.generate_content([str(questions_completed), """Give me the 2, 3 or 4 topics relating to each question in a list format
             For example, 
                 ['Does supervised learning have ouput labels?', 'Is capital of Greece Aethens?']
 
@@ -258,7 +258,7 @@ def process_video(video_path, lecture_id):
         """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
     topics_completed = res_ques_complete.text
 
-    res_ques_revision = gemini_model.generate_content([questions_for_revision, """Give me the 3 or 4 topics relating to the question in a list format
+    res_ques_revision = gemini_model.generate_content([str(questions_for_revision), """Give me the 3 or 4 topics relating to the question in a list format
             For example, 
                 ['Does supervised learning have ouput labels?', 'Is capital of Greece Aethens?']
 
