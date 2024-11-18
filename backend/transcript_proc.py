@@ -3,7 +3,6 @@ import cv2
 import torch
 import json
 import whisper
-import os
 from collections import defaultdict
 from inference_sdk import InferenceHTTPClient
 from torchvision import transforms
@@ -52,10 +51,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-# Parameters for hand raise detection and question analysis
-THRESHOLD_CORRECT = 0.7
-THRESHOLD_WRONG = 0.3
-
 # Define transformations if required by the model
 transform = transforms.Compose([
     transforms.ToTensor(),
@@ -100,34 +95,6 @@ def split_audio(audio_path, output_dir="chunks", chunk_duration=600):
     return chunk_paths
 
 
-# def transcribe_chunk(chunk_path, model_name="base"):
-#     """
-#     Transcribes a single audio chunk using Whisper, loading the model in each subprocess.
-#     """
-#     print(f"Transcribing {chunk_path}..., running on device: {device}")
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-#     model = whisper.load_model(model_name).to(device)
-#     result = model.transcribe(chunk_path)
-#     print(f"Completed transcription for {chunk_path}")
-#     return result['text']
-
-
-# def transcribe_audio_chunks(chunk_paths, model, use_gpu=True):
-#     """
-#     Transcribes audio chunks in parallel using Whisper.
-#     """
-#     print("Starting transcription of audio chunks...")
-#     device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
-#     model = whisper.load_model(model).to(device)
-
-#     transcripts = []
-#     with ProcessPoolExecutor(max_workers=4) as executor:
-#         futures = [executor.submit(transcribe_chunk, chunk, model_name="base") for chunk in chunk_paths]
-#         for future in futures:
-#             transcripts.append(future.result())
-
-#     return transcripts
-
 def transcribe_chunk_with_timestamps(chunk_path, model_name="base"):
     print(f"Transcribing {chunk_path}...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -156,14 +123,7 @@ def transcribe_audio_chunks_with_timestamps(chunk_paths, model="base", use_gpu=T
             transcripts.extend(future.result())
     return transcripts
 
-def save_transcripts_with_timestamps(transcripts, lecture_id)#, output_file_txt="transcript.txt", output_file_json="transcript_with_timestamps.json"):
-    # print(f"Saving transcripts with timestamps to {output_file_json}...")
-    # with open(output_file_json, "w") as f:
-    #     json.dump(transcripts, f, indent=4)
-
-    # with open(output_file_txt, "w") as f:
-    #         f.write(str(transcripts) + "\n")
-    # print(f"Transcripts saved to {output_file_txt} and {output_file_json}")
+def save_transcripts_with_timestamps(transcripts, lecture_id):
     print(f"Saving transcripts with timestamps to DB...")
     
     plain_transcript = "\n".join([segment["text"] for segment in timestamp_transcript])
@@ -187,10 +147,13 @@ def stream_transcripts(lecture_id):
     """
     Streams a large transcript file in chunks to the client.
     """
-    file_contents = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0}).get("plain_transcript")    
+    record = transcripts_collection.find_one({"lecture_id": lecture_id}, {"_id": 0})   
+    if not record:
+        return Response("Transcript not found", status=404, content_type="text/plain")
+
+    file_contents = record.get("plain_transcript", "")
     def generate():
-        # with open(file_path, "r") as f:
-        while chunk := file_contents.read(1024):  # Stream 1 KB at a time
+        for i in range(0, len(file_contents), 1024):
             yield chunk
     return Response(generate(), content_type="text/plain")
 
@@ -258,11 +221,20 @@ def process_video(video_path, lecture_id):
                 "not_answered": not_answered
             }
 
+            correct_ans_res = gemini_model.generate_content([question, "Give me 1 word answer whether the correct answer to this question is either yes or no. Do not return anything else, just that single word."], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
+            correct_ans = str(correct_ans_res.text)
+
             # Categorize question
-            if yes_count / total_students >= 0.8:  # Example threshold for completion
-                questions_completed.append(question)
+            if correct_ans.lower() == "yes"
+                if yes_count / total_students >= 0.7:  # Example threshold for completion
+                    questions_completed.append(question)
+                else:
+                    questions_for_revision.append(question)
             else:
-                questions_for_revision.append(question)
+                if no_count / total_students >= 0.7:  # Example threshold for completion
+                    questions_completed.append(question)
+                else:
+                    questions_for_revision.append(question)
 
     cap.release()
     
