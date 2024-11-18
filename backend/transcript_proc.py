@@ -1,5 +1,6 @@
 import os
 import cv2
+import ast
 import torch
 import json
 import whisper
@@ -230,7 +231,17 @@ def process_video(video_path, lecture_id):
                 "not_answered": not_answered
             }
 
-            correct_ans_res = gemini_model.generate_content([str(question), "Give me 1 word answer whether the correct answer to this question is either yes or no. Do not return anything else, just that single word."], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
+            correct_ans_res = gemini_model.generate_content([str(question), """Give me 1 word answer whether the correct answer to this question
+             is either yes or no. Do not return anything else, just that single word.
+
+                Example,
+                    'Is capital of Italy Rome?'
+
+                    Return: yes (one word yes or no)
+
+                    Return: str 
+
+             """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
             correct_ans = str(correct_ans_res.text)
 
             # Categorize question
@@ -253,10 +264,12 @@ def process_video(video_path, lecture_id):
 
                 Should return: ['Machine Learning', 'Artificial Intelligence', 'General Knowledge', 'Geography']
 
+                Just give a list and do not print anything else. Donot take example for their factual accuracy, but just for formatting.
             Return: List(str)
 
         """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
     topics_completed = res_ques_complete.text
+    print(f"{res_ques_complete} \n\n\n\n\n{topics_completed}\n\n\n\n\n")
 
     res_ques_revision = gemini_model.generate_content([str(questions_for_revision), """Give me the 3 or 4 topics relating to the question in a list format
             For example, 
@@ -264,10 +277,15 @@ def process_video(video_path, lecture_id):
 
                 Should return: ['Machine Learning', 'Artificial Intelligence', 'General Knowledge', 'Geography']
 
+                Just give a list and do not print anything else. Donot take example for their factual accuracy, but just for formatting.
+
                 Return: List(str)
         """], request_options=RequestOptions(retry=retry.Retry(initial=10, multiplier=2, maximum=60, timeout=300)))
     topics_for_revision = res_ques_revision.text
+    print(f"{res_ques_revision} \n\n\n\n\n{topics_for_revision}")
 
+    topics_completed = ast.literal_eval(topics_completed.strip())
+    topics_for_revision = ast.literal_eval(topics_for_revision.strip())
     # Save processing results in MongoDB
     results_collection.update_one(
         {"lecture_id": lecture_id},
