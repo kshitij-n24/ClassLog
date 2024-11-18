@@ -1,4 +1,6 @@
 /backend/__pycache__
 /backend/processed
 /backend/uploads
+/backend/.env
+/backend/transcript_with_timestamps.json
 

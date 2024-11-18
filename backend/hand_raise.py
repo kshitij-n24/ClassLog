@@ -1,11 +1,22 @@
+from inference_sdk import InferenceHTTPClient
 from flask import Flask, request, jsonify, redirect, url_for
 import cv2
 import torch
 from torchvision import transforms
 from collections import defaultdict
 import os
+from dotenv import load_dotenv
 
 app = Flask(__name__)
+
+load_dotenv()
+
+robo_key = os.getenv("ROBOFLOW_KEY")
+
+CLIENT = InferenceHTTPClient(
+    api_url="https://detect.roboflow.com",
+    api_key=robo_key
+)
 
 # Configure upload folder
 UPLOAD_FOLDER = 'uploads'
@@ -20,85 +31,84 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 THRESHOLD_CORRECT = 0.7
 THRESHOLD_WRONG = 0.3
 QUESTION_INTERVAL = 10
-model = torch.hub.load('WongKinYiu/yolov7', 'custom', '../../yolov7.pt', trust_repo=True)
-model.eval()
+# model = torch.hub.load('WongKinYiu/yolov7', 'custom', '../../yolov7.pt', trust_repo=True)
+# model.eval()
 
 # Define transformations if required by the model
 transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-
 def process_frame(frame):
     """Process a single frame for hand raise detection."""
     input_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    input_tensor = transform(input_frame).unsqueeze(0)  # Add batch dimension
 
-    with torch.no_grad():
-        outputs = model(input_tensor)
+    print('Fetching results from API')
+    result = CLIENT.infer(input_frame, model_id="hand-raise-v1m/20")
+    print('Retrieved the results')
 
-    print(input_tensor)
 
-    # Ensure the outputs are in the expected format
-    if isinstance(outputs, tuple):
-        outputs = outputs[0]  # Extract the relevant data if wrapped in a tuple
-
-    # Count the number of raised hands detected in the frame
     hand_raised_count = 0
-    for output in outputs.xyxy[0]:  # Adjust according to actual output structure
-        x1, y1, x2, y2, conf, cls = output
-        if int(cls) == 0:  # Replace 0 with the correct class index for 'hand_raised'
+    for boxes in result['predictions']:
+        if boxes['class_id'] == 0:
             hand_raised_count += 1
 
     return hand_raised_count
 
 
-def process_video(video_path):
+def process_video(video_path, timestamps):
     """Processes the video to detect raised hands and analyze question responses."""
     cap = cv2.VideoCapture(video_path)
+    if not video.isOpened():
+        raise Exception(f"Failed to open video file: {video_path}")
+    
     question_results = defaultdict(lambda: {'yes': 0, 'no': 0})
     frame_count = 0
     question_count = 1
+
+    
+    # Get video properties
+    fps = video.get(cv2.CAP_PROP_FPS)  # Frames per second
+    total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Map each timestamp to its corresponding frame index
+    timestamp_to_frame = {}
+    for timestamp in timestamps:
+        frame_index = int(fps * timestamp)
+        if 0 <= frame_index < total_frames:
+            video.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            success, frame = video.read()
+            if success:
+                timestamp_to_frame[timestamp] = frame
+            else:
+                timestamp_to_frame[timestamp] = None  # Mark as None if frame extraction failed
+        else:
+            timestamp_to_frame[timestamp] = None 
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        hand_raised_count = process_frame(frame)
+        
 
-        # Collect responses every QUESTION_INTERVAL frames
-        if frame_count % QUESTION_INTERVAL == 0:
-            total_people = 10  # Adjust this based on your use case
-            if hand_raised_count / total_people >= THRESHOLD_CORRECT:
-                question_results[question_count]['yes'] += 1
-            elif hand_raised_count / total_people <= THRESHOLD_WRONG:
-                question_results[question_count]['no'] += 1
-            question_count += 1
-
+        # Process the questions_for_revision and questions_completed
+        questions_for_revision = []
+        questions_completed = []
+        
         frame_count += 1
 
     cap.release()
 
     # Analyze results for revision or completion
-    questions_for_revision = []
-    questions_completed = []
-
-    for question, results in question_results.items():
-        total_responses = results['yes'] + results['no']
-        if total_responses == 0:
-            continue
-
-        yes_ratio = results['yes'] / total_responses
-        if yes_ratio >= THRESHOLD_CORRECT:
-            questions_completed.append(question)
-        elif yes_ratio <= THRESHOLD_WRONG:
-            questions_for_revision.append(question)
+    
 
     return {
         "questions_for_revision": questions_for_revision,
         "questions_completed": questions_completed
     }
+
+@app.route('')
 
 
 @app.route('/upload', methods=['POST'])
@@ -129,6 +139,8 @@ def upload_file():
 
     return jsonify(result)
 
+@app.route('/get_transcript', methods=['GET'])
+def 
 
 if __name__ == '__main__':
     app.run(debug=True)
